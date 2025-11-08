@@ -1,0 +1,47 @@
+{
+  "name": "telegram-arc-bot",
+  "version": "1.0.0",
+  "description": "Secure Telegram bot with Auth0 and ARC Network integration",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "test": "jest",
+    "lint": "eslint src/",
+    "validate-env": "node scripts/validate-env.js",
+    "build:workers": "esbuild workers/index.js --bundle --format=esm --outfile=dist/worker.js --platform=neutral --target=es2022",
+    "deploy:workers": "wrangler deploy",
+    "dev:workers": "wrangler dev",
+    "preview:workers": "wrangler preview"
+  },
+  "dependencies": {
+    "@openai/agents": "^0.3.0",
+    "auth0": "^4.0.0",
+    "bcryptjs": "^2.4.3",
+    "crypto": "^1.0.1",
+    "dotenv": "^16.3.1",
+    "ethers": "^6.15.0",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
+    "helmet": "^7.1.0",
+    "itty-router": "^4.0.0",
+    "joi": "^17.11.0",
+    "node-cron": "^3.0.3",
+    "node-telegram-bot-api": "^0.64.0",
+    "qrcode": "^1.5.3",
+    "winston": "^3.11.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.0.0",
+    "esbuild": "^0.19.0",
+    "eslint": "^8.55.0",
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.1",
+    "wrangler": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}
