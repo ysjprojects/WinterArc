@@ -14,7 +14,8 @@ const consoleFormat = winston.format.combine(
   winston.format.printf(({ timestamp, level, message, ...meta }) => {
     let log = `${timestamp} [${level}]: ${message}`;
     if (Object.keys(meta).length > 0) {
-      log += `\n${JSON.stringify(meta, null, 2)}`;
+      log += `\n${JSON.stringify(meta, (key, value) => 
+        typeof value === 'bigint' ? value.toString() : value, 2)}`;
     }
     return log;
   })
@@ -50,6 +51,10 @@ const sanitizeLogData = (data) => {
   if (typeof data !== 'object' || data === null) {
     return data;
   }
+  
+  if (typeof data === 'bigint') {
+    return data.toString();
+  }
 
   const sensitiveKeys = [
     'password', 'token', 'secret', 'key', 'seed', 'private',
@@ -62,6 +67,8 @@ const sanitizeLogData = (data) => {
     const lowerKey = key.toLowerCase();
     if (sensitiveKeys.some(sensitive => lowerKey.includes(sensitive))) {
       sanitized[key] = '[REDACTED]';
+    } else if (typeof value === 'bigint') {
+      sanitized[key] = value.toString();
     } else if (typeof value === 'object' && value !== null) {
       sanitized[key] = sanitizeLogData(value);
     }

@@ -1,7 +1,7 @@
 const telegramService = require('../services/telegramService');
 const auth0Service = require('../services/auth0Service');
 const arcService = require('../services/arcService');
-const { runAgent } = require('../services/agentService');
+const { createAgentService } = require('../services/agentService');
 const config = require('../config');
 const logger = require('../utils/logger');
 const { validateCommandArgs, parseRecipient, isValidAmount, isValidFriendAlias } = require('../utils/validation');
@@ -13,6 +13,10 @@ class BotController {
     this.setupCommandHandlers();
     this.setupCallbackHandlers();
     this.startCleanupTimer();
+    
+    // Initialize agent service with this controller
+    const { runAgent } = createAgentService(this);
+    this.runAgent = runAgent;
   }
 
   setupCommandHandlers() {
@@ -61,7 +65,7 @@ class BotController {
       // await telegramService.sendChatAction(chatId, 'typing'); // Assumes telegramService has sendChatAction
 
       // NEW: Call the agent
-      const agentResult = await runAgent(text, user);
+      const agentResult = await this.runAgent(text, user);
 
       // NEW: Process the agent's decision
       await this._handleAgentResult(message, user, agentResult);
@@ -1108,7 +1112,7 @@ This may take a few seconds.`,
 Amount: ${amount} ${currency}
 To: \`${targetAddress}\`
 Transaction: \`${result.hash}\`
-${currency === 'USDC' ? 'Fee' : 'Gas Fee'}: ${result.fee} USDC`,
+${currency === 'USDC' ? 'Fee' : 'Gas Fee'}: ${result.gasUsed && result.gasPrice ? (Number(result.gasUsed) * Number(result.gasPrice) / 1e18).toFixed(6) : 'N/A'} USDC`,
             { parse_mode: 'Markdown' }
           );
           
@@ -1893,7 +1897,7 @@ Example: 10.5`;
               // The mock agent is built to handle this specific prompt:
               const historyPrompt = `Here is the user's transaction history in a pre-formatted text block. Please present this to the user with a friendly intro. \n\n${historyText}`;
               
-              const summaryResult = await runAgent(historyPrompt, user);
+              const summaryResult = await this.runAgent(historyPrompt, user);
               
               await telegramService.sendMessage(chatId, summaryResult.content, { parse_mode: 'Markdown' });
               
@@ -2122,6 +2126,25 @@ Address: \`${address}\``;
         }
       }
     }, 5 * 60 * 1000); // Check every 5 minutes
+  }
+
+  /**
+   * Tool handler methods for the OpenAI agent
+   */
+  async handleTransactionHistoryTool() {
+    // Get the current user from context (this is a simplified approach)
+    // In a real implementation, you'd need to pass the user context through the tool execution
+    throw new Error('User context not available in tool execution - this approach needs refinement');
+  }
+
+  async handlePaymentTool(recipient, amount) {
+    // Get the current user from context 
+    throw new Error('User context not available in tool execution - this approach needs refinement');
+  }
+
+  async handlePaymentRequestTool(address, amount) {
+    // Get the current user from context
+    throw new Error('User context not available in tool execution - this approach needs refinement');
   }
 }
 

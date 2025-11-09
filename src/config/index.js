@@ -46,6 +46,10 @@ class Config {
       level: this.env.LOG_LEVEL
     };
 
+    this.openai = {
+      apiKey: this.env.OPENAI_API_KEY
+    };
+
     this.database = {
       url: this.env.DATABASE_URL
     };

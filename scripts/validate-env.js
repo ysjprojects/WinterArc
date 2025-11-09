@@ -20,6 +20,7 @@ const envSchema = Joi.object({
   RATE_LIMIT_WINDOW_MS: Joi.number().default(900000).description('Rate limit window in milliseconds'),
   RATE_LIMIT_MAX_REQUESTS: Joi.number().default(100).description('Max requests per window'),
   LOG_LEVEL: Joi.string().valid('error', 'warn', 'info', 'debug').default('info'),
+  OPENAI_API_KEY: Joi.string().optional().description('OpenAI API Key for agent functionality'),
   DATABASE_URL: Joi.string().optional().description('Database URL (optional)')
 }).unknown();
 

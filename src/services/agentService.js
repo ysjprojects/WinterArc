@@ -1,74 +1,155 @@
-const { Agent, tool } = require('@openai/agents');
+const { Agent, tool, run } = require('@openai/agents');
+const config = require('../config');
+const logger = require('../utils/logger');
 
 /**
  * ----------------------------------------------------------------
- * Tool Definitions
+ * Create Agent Service Factory
  * ----------------------------------------------------------------
- * These definitions tell the agent WHAT it can do.
- * The BotController will handle the HOW.
+ * Creates agent with executable tools that have access to services
  */
 
-const getTransactionHistory = tool({
-  name: 'get_transaction_history',
-  description: "Get the current user's transaction history.",
-  parameters: {
-    type: 'object',
-    properties: {},
-  },
-});
-
-const makePayment = tool({
-  name: 'make_payment',
-  description: 'Initiate a USDC payment to a given address, telegram username, or friend alias with a specific amount.',
-  parameters: {
-    type: 'object',
-    properties: {
-      recipient: { type: 'string', description: 'The recipient: EVM address (e.g., 0x...), telegram username (e.g., @bob), or friend alias (e.g., bob)' },
-      amount: { type: 'number', description: 'The amount of USDC to send' },
+function createAgentService(botController) {
+  // Store the last tool call for the controller to access
+  let lastToolCall = null;
+  
+  const getTransactionHistory = tool({
+    name: 'get_transaction_history',
+    description: "Get the current user's transaction history.",
+    parameters: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
     },
-    required: ['recipient', 'amount'],
-  },
-});
+    execute: async () => {
+      lastToolCall = { type: 'tool_call', toolName: 'get_transaction_history', arguments: {} };
+      return 'Getting your transaction history...';
+    }
+  });
 
-const requestPayment = tool({
+  const makePayment = tool({
+    name: 'make_payment',
+    description: 'Initiate a USDC payment to a given address, telegram username, or friend alias with a specific amount.',
+    parameters: {
+      type: 'object',
+      properties: {
+        recipient: { type: 'string', description: 'The recipient: EVM address (e.g., 0x...), telegram username (e.g., @bob), or friend alias (e.g., bob)' },
+        amount: { type: 'number', description: 'The amount of USDC to send' },
+      },
+      required: ['recipient', 'amount'],
+      additionalProperties: false,
+    },
+    execute: async ({ recipient, amount }) => {
+      lastToolCall = { type: 'tool_call', toolName: 'make_payment', arguments: { recipient, amount } };
+      return `Sending ${amount} USDC to ${recipient}...`;
+    }
+  });
+
+  const requestPayment = tool({
     name: 'request_payment',
     description: 'Request a payment from a given address, a telegram username, or a friend alias with a specific amount.',
     parameters: {
-        type: 'object',
-        properties: {
-            address: { type: 'string', description: 'The recipient EVM address (e.g., 0x...), a telegram username (e.g., @bob123), or a friend alias (e.g., bob)' },
-            amount: { type: 'number', description: 'The amount of USDC to send' },
-        },
-        required: ['address', 'amount'],
+      type: 'object',
+      properties: {
+        address: { type: 'string', description: 'The recipient EVM address (e.g., 0x...), a telegram username (e.g., @bob123), or a friend alias (e.g., bob)' },
+        amount: { type: 'number', description: 'The amount of USDC to send' },
+      },
+      required: ['address', 'amount'],
+      additionalProperties: false,
     },
-});
+    execute: async ({ address, amount }) => {
+      lastToolCall = { type: 'tool_call', toolName: 'request_payment', arguments: { address, amount } };
+      return `Requesting ${amount} USDC from ${address}...`;
+    }
+  });
 
+
+  const arcAssistant = new Agent({
+    name: 'Arc Assistant',
+    instructions:
+      "You are an ARC wallet assistant. When users ask for specific actions, IMMEDIATELY use the appropriate tool without any additional questions or explanations.\n\n" +
+      "RULES:\n" +
+      "1. History requests (show history, transaction history, who sent money, etc.) → IMMEDIATELY call get_transaction_history\n" +
+      "2. Send money (send X to Y, pay X to Y, transfer X to Y) → IMMEDIATELY call make_payment\n" +
+      "3. Request money (request X from Y) → IMMEDIATELY call request_payment\n\n" +
+      "DO NOT:\n" +
+      "- Ask follow-up questions\n" +
+      "- Ask for clarification\n" +
+      "- Ask about timeframes or filters\n" +
+      "- Provide explanations before using tools\n\n" +
+      "JUST USE THE TOOL IMMEDIATELY when the user's intent is clear.",
+    tools: [getTransactionHistory, makePayment, requestPayment],
+    model: 'gpt-5-mini',
+    apiKey: config.openai.apiKey,
+  });
+
+  // Helper function to access and reset lastToolCall
+  const getLastToolCall = () => {
+    if (lastToolCall) {
+      const result = { ...lastToolCall };
+      lastToolCall = null; // Reset for next call
+      return result;
+    }
+    return null;
+  };
+
+  return { arcAssistant, runAgent: createRunAgent(arcAssistant, getLastToolCall) };
+}
+
+function createRunAgent(arcAssistant, getLastToolCall) {
+  return async (text, user) => {
+    try {
+      if (!config.openai.apiKey) {
+        logger.warn('OpenAI API key not configured, falling back to mock agent');
+        return runAgentMock(text, user);
+      }
+
+      logger.info('Running real OpenAI agent', { text });
+      
+      // Use the run function from the SDK - tools will execute automatically
+      const response = await run(arcAssistant, text);
+      
+      logger.info('Raw OpenAI response', { 
+        finalOutput: response.finalOutput,
+        messageCount: response.messages?.length,
+        hasToolCalls: response.messages?.some(msg => msg.tool_calls?.length > 0),
+        lastMessage: response.messages?.[response.messages.length - 1]
+      });
+      
+      // Check if a tool was executed (stored in lastToolCall)
+      const toolCall = getLastToolCall();
+      if (toolCall) {
+        logger.info('Tool was called by agent', { toolCall });
+        return toolCall;
+      }
+      
+      // If no tools were called, return the chat response
+      return {
+        type: 'chat_response',
+        content: response.finalOutput || "I'm not sure how to help with that."
+      };
+      
+    } catch (error) {
+      logger.error('Agent execution failed, falling back to mock', {
+        error: error.message,
+        stack: error.stack,
+        text: text.substring(0, 50)
+      });
+      
+      // Fallback to mock agent if real agent fails
+      return runAgentMock(text, user);
+    }
+  };
+}
 
 /**
  * ----------------------------------------------------------------
- * Agent Definition
- * ----------------------------------------------------------------
- */
-
-const arcAssistant = new Agent({
-  name: 'Arc Assistant',
-  instructions:
-    "You are a helpful assistant for the ARC wallet. Your goal is to understand the user's text and decide whether they are asking for information or trying to make a payment.\n" +
-    "- If they ask for history, transactions, or past payments, use 'get_transaction_history'.\n" +
-    "- If they want to send money (e.g., 'send 10 to bob', 'pay 5 USDC to @alice', 'transfer 2.5 to 0x123'), use 'make_payment'.\n" +
-    "- If they want to request money (e.g., 'request 10 from @bob123'), use 'request_payment'.\n" +
-    "- For anything else, just provide a helpful chat response.",
-  tools: [getTransactionHistory, makePayment, requestPayment],
-});
-
-/**
- * ----------------------------------------------------------------
- * Mock Agent Runner
+ * Mock Agent Runner (Backup)
  * ----------------------------------------------------------------
  * This MOCK function simulates the output of the arcAssistant.
  * It returns the action the controller should take.
  */
-const runAgent = async (text, user) => {
+const runAgentMock = async (text, user) => {
   // --- This is a MOCK to simulate the agent's decision ---
 
   // 1. Handle the "second query" for history summarization
@@ -107,7 +188,7 @@ const runAgent = async (text, user) => {
   }
 
   // 3. Handle history request
-  const historyRegex = /(?:show|get|my)\s+(?:transaction\s+)?(history|transactions|past payments)/i;
+  const historyRegex = /(?:show|get|my|who.*sent|payment|transaction)\s*(?:history|transactions|past payments|money|activity)|who.*(?:sent|paid|transferred|transacted)/i;
   const historyMatch = text.match(historyRegex);
   if (historyMatch) {
     return {
@@ -125,6 +206,6 @@ const runAgent = async (text, user) => {
 };
 
 module.exports = {
-  arcAssistant,
-  runAgent,
+  createAgentService,
+  runAgentMock,
 };
